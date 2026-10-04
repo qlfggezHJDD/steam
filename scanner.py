@@ -58,6 +58,9 @@ class Scanner:
         self.started_at: Optional[str] = None
         self.failed = 0
         self.pending = []
+        self.ok = 0
+        self.abort_reason = ""
+        self.last_err = ""
 
     def get_status(self) -> dict:
         return {
@@ -79,9 +82,10 @@ class Scanner:
         for attempt in range(retries):
             try:
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=timeout),
-                                       headers={"User-Agent": "Mozilla/5.0"}) as r:
+                                       headers={"User-Agent": "SideQuestScanner/1.0 (+https://side-quest.pro)"}) as r:
                     if r.status == 200:
                         return await r.json(content_type=None)
+                    self.last_err = f"HTTP {r.status} from {url.split('/')[2]}"
                     if r.status in (403, 429, 500, 502, 503):
                         try:
                             wait = float(r.headers.get("Retry-After", 2 ** attempt * 2))
@@ -91,6 +95,7 @@ class Scanner:
                         continue
                     return None
             except (asyncio.TimeoutError, aiohttp.ClientError):
+                self.last_err = "timeout / network error"
                 await asyncio.sleep(2 ** attempt)
             except ValueError:
                 return None
@@ -252,6 +257,10 @@ class Scanner:
             print(f"[!] {game_raw.get('name')}: {e}")
             self.failed += 1
             res = None
+        if res:
+            self.ok += 1
+        if self.failed >= 40 and self.ok == 0 and not self._stop_flag:
+            self._stop_flag, self.abort_reason = True, self.last_err or "no answer from Steam"
         self.progress += 1
         if res and res[0] == "dead":
             self.dead_count += 1
@@ -265,6 +274,7 @@ class Scanner:
         self.is_running, self._stop_flag = True, False
         self.progress = self.total = self.dead_count = self.new_dead_count = 0
         self.failed, self.pending = 0, []
+        self.ok, self.abort_reason, self.last_err = 0, "", ""
         self.started_at = datetime.utcnow().isoformat()
         self.current_game = ""
         self.scan_id = await db.create_scan()
@@ -281,8 +291,12 @@ class Scanner:
                 self.current_game = "Fetching Discord games..."
                 await self._broadcast_progress()
                 async with session.get(DISCORD_DETECTABLE_URL, headers={"User-Agent": "Mozilla/5.0"}) as r:
-                    discord_games = await r.json() if r.status == 200 else []
+                    if r.status != 200:
+                        raise RuntimeError(f"Discord game list unavailable (HTTP {r.status})")
+                    discord_games = await r.json()
                 steam_games = [g for g in discord_games if self._extract_steam_appid(g)]
+                if not steam_games:
+                    raise RuntimeError("Discord returned no Steam games")
                 self.total = len(steam_games)
                 await db.update_scan(self.scan_id, total_games=self.total)
                 await self._broadcast_progress()
@@ -291,6 +305,8 @@ class Scanner:
                 await asyncio.gather(*[self._process_game(session, g, steam_sem, details_sem, notifier)
                                        for g in steam_games], return_exceptions=True)
 
+            if self.abort_reason:
+                raise RuntimeError("Scan aborted, Steam is not answering: " + self.abort_reason)
             finish = "stopped" if self._stop_flag else "completed"
             await db.update_scan(self.scan_id, finished_at=datetime.utcnow().isoformat(),
                                  total_processed=self.progress, total_dead=self.dead_count,
@@ -305,6 +321,7 @@ class Scanner:
                 await notifier.notify_scan_complete(total=self.progress, dead=self.dead_count,
                                                     new_dead=self.new_dead_count)
         except Exception as e:
+            print(f"[scan failed] {e}", flush=True)
             await db.update_scan(self.scan_id, status="failed", finished_at=datetime.utcnow().isoformat())
             await self._broadcast({"type": "scan_error", "error": str(e)})
         finally:

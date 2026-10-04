@@ -109,7 +109,7 @@ class BasicAuth:
 
     async def __call__(self, scope, receive, send):
         pw = os.getenv("ADMIN_PASSWORD")
-        if not pw or scope["type"] not in ("http", "websocket") or scope.get("path") == "/api/health":
+        if not pw or scope["type"] not in ("http", "websocket") or scope.get("path") in ("/api/health", "/api/cron/scan"):
             return await self.app(scope, receive, send)
         auth, ok = dict(scope["headers"]).get(b"authorization", b"").decode(), False
         if auth.startswith("Basic "):
@@ -133,6 +133,18 @@ app.add_middleware(BasicAuth)
 @app.get("/api/health")
 async def health():
     return {"ok": True}
+
+
+@app.get("/api/cron/scan")
+async def cron_scan(background_tasks: BackgroundTasks, key: str = ""):
+    """Pour cron-job.org : réveille le service ET lance un scan. Protégé par CRON_KEY (pas par le mot de passe)."""
+    k = os.getenv("CRON_KEY")
+    if not k or not secrets.compare_digest(key, k):
+        raise HTTPException(401, "bad key")
+    if scanner.is_running:
+        return {"ok": True, "status": "already running"}
+    background_tasks.add_task(scanner.run, notifier)
+    return {"ok": True, "status": "started"}
 
 
 @app.post("/api/games/{discord_id}/pin")

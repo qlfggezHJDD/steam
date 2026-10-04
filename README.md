@@ -80,6 +80,7 @@ Tout se règle dans le dashboard (Settings → Score / Scanner, panneau Filters)
 | `MIN_INACTIVE_DAYS` | 365 | Durée sans review ni news |
 | `RECHECK_ALIVE_DAYS` | 7 | Délai avant de re-tester un jeu vivant |
 | `NOTIFY_MIN_SCORE` | 40 | Score minimum pour une alerte Discord |
+| `CRON_KEY` | — | Clé secrète du cron externe : `GET /api/cron/scan?key=…` réveille Render et lance un scan, sans mot de passe |
 | `ADMIN_PASSWORD` | — | Mot de passe du dashboard (HTTP Basic, n'importe quel identifiant). **À définir sur Render** |
 
 ### API
@@ -196,3 +197,10 @@ Un dev avec plusieurs jeux morts = un seul mail pour plusieurs placements. Ajout
 Mot de passe (`ADMIN_PASSWORD`), `/api/health`, alertes Discord groupées (max par scan réglable), compteur d'échecs, `min_zero_streak`, verrou des statuts manuels, re-test des `unknown` tous les 30 jours, suivi des offres (statut, note, relance, modèles FR/EN, entonnoir), détail du score par critère, nombre de jeux morts du même dev, `smoke.py` (`python smoke.py 50` pour tester pour de vrai en local).
 
 Pas encore fait : historique des joueurs, presets de filtres, tri par colonne, reprise de scan, disjoncteur 403, source élargie, vue mobile en cartes, tests automatisés.
+
+## 10. Cron externe (cron-job.org)
+
+- **Ne pas** pointer le cron sur `/` : avec `ADMIN_PASSWORD`, la page répond 401 et cron-job.org désactive le job après trop d'échecs.
+- Pour garder Render éveillé : `https://TON-SERVICE.onrender.com/api/health` (pas de mot de passe).
+- Pour lancer un scan automatique : définir `CRON_KEY` sur Render, puis `https://TON-SERVICE.onrender.com/api/cron/scan?key=TA_CLE`.
+- Un scan s'arrête désormais avec un message clair si Discord ou Steam ne répondent pas (après 40 échecs sans aucun succès), au lieu de tourner dans le vide.
