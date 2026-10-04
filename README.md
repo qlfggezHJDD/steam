@@ -28,7 +28,7 @@ Les appels bon marché passent en premier : `appdetails` (limité à environ 200
 | `dead` | joueurs ≤ 0, reviews ≤ 0, sorti depuis ≥ 180 jours, aucune review ni news depuis ≥ 365 jours |
 | `dying` | reviews ≤ 10 et (inactif ≥ 365 jours, ou ≥ 180 jours) |
 | `alive` | tout le reste, y compris les jeux pas encore sortis ou trop récents |
-| `unknown` | page retirée, ou développeur/éditeur exclu |
+| `unknown` | page retirée, développeur/éditeur exclu, ou Steam ne connaît pas l'appli (il répond 404 + `result: 42`, ce n'est pas une erreur) |
 | `ignored` | n'est pas un jeu (DLC, outil…) : jamais re-testé |
 
 Un échec réseau ne change **jamais** le statut d'un jeu (il garde son état précédent).
@@ -134,7 +134,7 @@ Tout a été écrit sans accès réseau.
 - [x] **« Auto-édité » défini de deux façons** : intersection de noms dans le score, égalité exacte dans le filtre SQL. Stocker une colonne `self_pub` calculée une fois.
 - [x] **Détection email/site par `"@"`** dans l'UI : une URL contenant `@` s'affiche comme un mail. L'UI doit utiliser les colonnes `email` et `website`.
 - [ ] **Poids du score non calibrés** : ce sont des estimations, pas des mesures. Voir le suivi des offres ci-dessous.
-- [ ] **User-Agent « Mozilla/5.0 »** : à remplacer par un User-Agent clair. `appdetails` n'est pas une API documentée, elle peut changer.
+- [x] **User-Agent** : Steam est appelé sans en-tête personnalisé et Discord avec « Mozilla/5.0 », exactement comme la version d'origine. `appdetails` n'est pas une API documentée, elle peut changer.
 
 ### Priorité 2 (confort)
 
@@ -205,3 +205,4 @@ Pas encore fait : historique des joueurs, presets de filtres, tri par colonne, r
 - Pour lancer un scan automatique : définir `CRON_KEY` sur Render, puis `https://TON-SERVICE.onrender.com/api/cron/scan?key=TA_CLE`.
 - Un scan s'arrête désormais avec un message clair si Discord ou Steam ne répondent pas (après 40 échecs sans aucun succès), au lieu de tourner dans le vide.
 - **Scan qui échoue ?** Dashboard → Settings → Scanner → **Test connections** : teste Discord et chaque API Steam depuis le serveur et affiche le code HTTP (403 = bloqué, 429 = trop de requêtes, 0 = réseau). La dernière erreur s'affiche aussi à côté du compteur « failed » pendant un scan, et le réglage « Parallel Steam requests » permet de ralentir si Steam répond 429.
+- **Contrôle de départ :** avant de lancer les 19 000 requêtes, le scan teste l'API des joueurs sur un jeu connu (Counter-Strike 2). Si elle ne répond pas correctement, le scan s'arrête tout de suite avec la raison. Les apps que Steam ne connaît pas (404) sont comptées à part (« not on Steam », avec un exemple et son identifiant), pas comme des erreurs.

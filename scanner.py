@@ -61,13 +61,15 @@ class Scanner:
         self.ok = 0
         self.abort_reason = ""
         self.last_err = ""
+        self.unknown = 0
+        self.last_unknown = ""
 
     def get_status(self) -> dict:
         return {
             "is_running": self.is_running, "scan_id": self.scan_id,
             "progress": self.progress, "total": self.total,
             "current_game": self.current_game, "dead_count": self.dead_count,
-            "new_dead_count": self.new_dead_count, "started_at": self.started_at, "failed": self.failed, "last_err": self.last_err,
+            "new_dead_count": self.new_dead_count, "started_at": self.started_at, "failed": self.failed, "last_err": self.last_err, "unknown": self.unknown, "last_unknown": self.last_unknown,
             "pct": round(self.progress / self.total * 100) if self.total else 0,
         }
 
@@ -81,10 +83,14 @@ class Scanner:
     async def _get_json(self, session, url, params=None, timeout=12, retries=4):
         for attempt in range(retries):
             try:
-                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=timeout),
-                                       headers={"User-Agent": "SideQuestScanner/1.0 (+https://side-quest.pro)"}) as r:
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
                     if r.status == 200:
                         return await r.json(content_type=None)
+                    if r.status == 404:                             # Steam : appli inconnue = 404 + result 42, pas une panne
+                        try:
+                            return await r.json(content_type=None)
+                        except Exception:
+                            return {}
                     self.last_err = f"HTTP {r.status} from {url.split('/')[2]}"
                     if r.status in (403, 429, 500, 502, 503):
                         try:
@@ -165,12 +171,16 @@ class Scanner:
                 "last_checked": datetime.utcnow().isoformat()}
 
         async with steam_sem:
+            if self._stop_flag:
+                return None
             players = await self._players(session, appid)
         if players is None:
             self.failed += 1
             return None                                     # échec → on garde l'ancien état
         if players < 0:                                     # appli fantôme / retirée : ce n'est pas une erreur
             await db.upsert_game({**base, "status": "unknown", "score": 0, "notes": "no player data from Steam"})
+            self.unknown += 1
+            self.last_unknown = f"{name}, app {appid}"
             return "unknown", False
         streak = (k["zero_streak"] or 0) + 1 if (players == 0 and k) else (1 if players == 0 else 0)
         base.update(current_players=players, zero_streak=streak)
@@ -195,6 +205,8 @@ class Scanner:
             return "alive", False
 
         async with details_sem:                             # appdetails = limité (~200/5min) → survivants only
+            if self._stop_flag:
+                return None
             info = await self._details(session, appid)
             await asyncio.sleep(1.6)
         if info is None:
@@ -267,6 +279,8 @@ class Scanner:
             self.ok += 1
         if self.failed >= 12 and self.ok == 0 and not self._stop_flag:
             self._stop_flag, self.abort_reason = True, self.last_err or "no answer from Steam"
+        if self._stop_flag and res is None:
+            return
         self.progress += 1
         if res and res[0] == "dead":
             self.dead_count += 1
@@ -288,7 +302,7 @@ class Scanner:
                 t = time.perf_counter()
                 try:
                     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=12),
-                                           headers={"User-Agent": "SideQuestScanner/1.0 (+https://side-quest.pro)"}) as r:
+                                           headers={"User-Agent": "Mozilla/5.0"} if "discord.com" in url else None) as r:
                         body = (await r.content.read(110)).decode("utf-8", "replace").replace("\n", " ")
                         out.append({"name": name, "ok": r.status == 200, "status": r.status,
                                     "ms": int((time.perf_counter() - t) * 1000), "body": body})
@@ -304,6 +318,7 @@ class Scanner:
         self.progress = self.total = self.dead_count = self.new_dead_count = 0
         self.failed, self.pending = 0, []
         self.ok, self.abort_reason, self.last_err = 0, "", ""
+        self.unknown, self.last_unknown = 0, ""
         self.started_at = datetime.utcnow().isoformat()
         self.current_game = ""
         self.scan_id = await db.create_scan()
@@ -326,6 +341,10 @@ class Scanner:
                 steam_games = [g for g in discord_games if self._extract_steam_appid(g)]
                 if not steam_games:
                     raise RuntimeError("Discord returned no Steam games")
+                canary = await self._get_json(session, PLAYERS_URL, {"appid": 730})
+                if (canary or {}).get("response", {}).get("result") != 1:
+                    raise RuntimeError("Steam player API check failed on a known game (Counter-Strike 2): "
+                                       + (self.last_err or f"unexpected answer {str(canary)[:80]}"))
                 self.total = len(steam_games)
                 await db.update_scan(self.scan_id, total_games=self.total)
                 await self._broadcast_progress()
