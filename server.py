@@ -235,6 +235,11 @@ async def put_criteria(body: dict):
     return {"ok": True, "recomputed": await db.recompute_scores(), "criteria": cfg}
 
 
+@app.get("/api/diagnose")
+async def diagnose():
+    return await scanner.diagnose()
+
+
 @app.get("/api/scanner")
 async def get_scanner():
     return await db.get_scanner_cfg()

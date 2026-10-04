@@ -291,7 +291,7 @@ SCAN_DEFAULTS = {
     "use_inactivity": True, "min_inactive_days": _e("MIN_INACTIVE_DAYS", 365),
     "use_news": True, "recheck_alive_days": _e("RECHECK_ALIVE_DAYS", 7),
     "notify_min_score": _e("NOTIFY_MIN_SCORE", 40), "notify_require_contact": False,
-    "exclude_publishers": "", "fetch_reviews_all": True, "min_zero_streak": 1, "notify_max_per_scan": 20, "offer_price": "",
+    "exclude_publishers": "", "fetch_reviews_all": True, "min_zero_streak": 1, "concurrency": 8, "notify_max_per_scan": 20, "offer_price": "",
 }
 
 

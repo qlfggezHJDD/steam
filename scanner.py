@@ -67,7 +67,7 @@ class Scanner:
             "is_running": self.is_running, "scan_id": self.scan_id,
             "progress": self.progress, "total": self.total,
             "current_game": self.current_game, "dead_count": self.dead_count,
-            "new_dead_count": self.new_dead_count, "started_at": self.started_at, "failed": self.failed,
+            "new_dead_count": self.new_dead_count, "started_at": self.started_at, "failed": self.failed, "last_err": self.last_err,
             "pct": round(self.progress / self.total * 100) if self.total else 0,
         }
 
@@ -98,6 +98,7 @@ class Scanner:
                 self.last_err = "timeout / network error"
                 await asyncio.sleep(2 ** attempt)
             except ValueError:
+                self.last_err = "invalid JSON"
                 return None
         return None
 
@@ -111,8 +112,10 @@ class Scanner:
     # ── Étape 1 : joueurs (officiel). None = échec/inconnu → on ne conclut RIEN ──
     async def _players(self, session, appid) -> Optional[int]:
         data = await self._get_json(session, PLAYERS_URL, {"appid": appid})
-        resp = (data or {}).get("response", {})
-        return resp.get("player_count") if resp.get("result") == 1 else None
+        if data is None:
+            return None                                     # vrai échec réseau
+        resp = data.get("response", {})
+        return resp.get("player_count") if resp.get("result") == 1 else -1   # -1 = Steam répond mais sans stats pour cette appli
 
     # ── Étape 2 : reviews réelles + date de la dernière review ──
     async def _reviews(self, session, appid):
@@ -166,6 +169,9 @@ class Scanner:
         if players is None:
             self.failed += 1
             return None                                     # échec → on garde l'ancien état
+        if players < 0:                                     # appli fantôme / retirée : ce n'est pas une erreur
+            await db.upsert_game({**base, "status": "unknown", "score": 0, "notes": "no player data from Steam"})
+            return "unknown", False
         streak = (k["zero_streak"] or 0) + 1 if (players == 0 and k) else (1 if players == 0 else 0)
         base.update(current_players=players, zero_streak=streak)
 
@@ -259,7 +265,7 @@ class Scanner:
             res = None
         if res:
             self.ok += 1
-        if self.failed >= 40 and self.ok == 0 and not self._stop_flag:
+        if self.failed >= 12 and self.ok == 0 and not self._stop_flag:
             self._stop_flag, self.abort_reason = True, self.last_err or "no answer from Steam"
         self.progress += 1
         if res and res[0] == "dead":
@@ -267,6 +273,29 @@ class Scanner:
         if res and res[1]:
             self.new_dead_count += 1
         await self._broadcast_progress()
+
+    async def diagnose(self) -> list:
+        """Teste chaque service une fois, DEPUIS le serveur (Render), pour voir qui bloque."""
+        import time
+        checks = [("Discord game list", DISCORD_DETECTABLE_URL, None),
+                  ("Steam players (CS2)", PLAYERS_URL, {"appid": 730}),
+                  ("Steam reviews (CS2)", REVIEWS_URL.format(appid=730), {"json": 1, "num_per_page": 1}),
+                  ("Steam appdetails (CS2)", DETAILS_URL, {"appids": 730, "filters": "basic"}),
+                  ("Steam news (CS2)", NEWS_URL, {"appid": 730, "count": 1})]
+        out = []
+        async with aiohttp.ClientSession() as session:
+            for name, url, params in checks:
+                t = time.perf_counter()
+                try:
+                    async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=12),
+                                           headers={"User-Agent": "SideQuestScanner/1.0 (+https://side-quest.pro)"}) as r:
+                        body = (await r.content.read(110)).decode("utf-8", "replace").replace("\n", " ")
+                        out.append({"name": name, "ok": r.status == 200, "status": r.status,
+                                    "ms": int((time.perf_counter() - t) * 1000), "body": body})
+                except Exception as e:
+                    out.append({"name": name, "ok": False, "status": 0,
+                                "ms": int((time.perf_counter() - t) * 1000), "body": type(e).__name__})
+        return out
 
     async def run(self, notifier=None):
         if self.is_running:
@@ -301,7 +330,7 @@ class Scanner:
                 await db.update_scan(self.scan_id, total_games=self.total)
                 await self._broadcast_progress()
 
-                steam_sem, details_sem = asyncio.Semaphore(CONCURRENCY_STEAM), asyncio.Semaphore(1)
+                steam_sem, details_sem = asyncio.Semaphore(max(1, self.sc["concurrency"])), asyncio.Semaphore(1)
                 await asyncio.gather(*[self._process_game(session, g, steam_sem, details_sem, notifier)
                                        for g in steam_games], return_exceptions=True)
 

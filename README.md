@@ -204,3 +204,4 @@ Pas encore fait : historique des joueurs, presets de filtres, tri par colonne, r
 - Pour garder Render éveillé : `https://TON-SERVICE.onrender.com/api/health` (pas de mot de passe).
 - Pour lancer un scan automatique : définir `CRON_KEY` sur Render, puis `https://TON-SERVICE.onrender.com/api/cron/scan?key=TA_CLE`.
 - Un scan s'arrête désormais avec un message clair si Discord ou Steam ne répondent pas (après 40 échecs sans aucun succès), au lieu de tourner dans le vide.
+- **Scan qui échoue ?** Dashboard → Settings → Scanner → **Test connections** : teste Discord et chaque API Steam depuis le serveur et affiche le code HTTP (403 = bloqué, 429 = trop de requêtes, 0 = réseau). La dernière erreur s'affiche aussi à côté du compteur « failed » pendant un scan, et le réglage « Parallel Steam requests » permet de ralentir si Steam répond 429.
