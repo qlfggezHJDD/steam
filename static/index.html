@@ -201,7 +201,7 @@ const nf=n=>n==null?'—':Number(n).toLocaleString('en');
 const ic=n=>`<svg class="ic"><use href="#i-${n}"/></svg>`;
 const J=(u,o)=>fetch(u,o).then(r=>r.json());
 let filter='dead',page=1,PER=25,search='',first=true,scanning=false,timer;
-function toast(m){const t=document.createElement('div');t.className='toast';t.innerHTML=ic('ok')+`<span>${esc(m)}</span>`;$('#toasts').append(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),320)},2800)}
+function toast(m,ms=2800){const t=document.createElement('div');t.className='toast';t.innerHTML=ic('ok')+`<span>${esc(m)}</span>`;$('#toasts').append(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),320)},ms)}
 function countTo(el,to,d=1200){const from=+el.dataset.v||0;el.dataset.v=to;const t0=performance.now();(function f(t){const p=Math.min((t-t0)/d,1),e=1-Math.pow(1-p,4);el.textContent=nf(Math.round(from+(to-from)*e));if(p<1)requestAnimationFrame(f)})(t0)}
 function thumb(){const b=$('#seg .on');$('#thumb').style.cssText=`width:${b.offsetWidth}px;transform:translateX(${b.offsetLeft}px)`}
 const ago=ts=>{if(!ts)return'never';const d=Math.floor((Date.now()/1000-ts)/86400);return d<1?'today':d<60?d+' days ago':d<730?Math.floor(d/30)+' months ago':Math.floor(d/365)+' years ago'};
@@ -254,11 +254,11 @@ function render(games){
   const t=$('#tbl');if(first){first=false;setTimeout(()=>t.classList.remove('intro'),2200)}else{t.classList.remove('swap');void t.offsetWidth;t.classList.add('swap')}}
 function setScan(s){scanning=!!s.is_running;const b=$('#bScan');b.className='btn '+(scanning?'stop':'pri');b.innerHTML=`${ic(scanning?'stop':'play')}<span>${scanning?'Stop scan':'Scan Steam'}</span>`;
   $('#bar').classList.toggle('run',scanning);$('#bar i').style.width=(scanning?s.pct||0:0)+'%';$('#scan').classList.toggle('on',scanning);
-  if(scanning)$('#scanTxt').innerHTML=`<b>${s.pct||0}%</b>  ${nf(s.progress)} / ${nf(s.total)} checked   ${nf(s.dead_count)} dead   ${nf(s.failed||0)} failed${s.last_err?' ('+esc(s.last_err)+')':''}   ${esc(s.current_game||'')}`}
+  if(scanning)$('#scanTxt').innerHTML=`<b>${s.pct||0}%</b>  ${nf(s.progress)} / ${nf(s.total)} checked   ${nf(s.dead_count)} dead   ${nf(s.unknown||0)} not on Steam${s.last_unknown?' (e.g. '+esc(s.last_unknown)+')':''}   ${nf(s.failed||0)} failed${s.last_err?' ('+esc(s.last_err)+')':''}`}
 function connect(){const ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws');
   ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='scan_status'||m.type==='scan_progress')setScan(m);if(m.type==='scan_started')setScan({is_running:true,pct:0});
     if(m.type==='scan_complete'){setScan({is_running:false});toast(m.status==='stopped'?'Scan stopped':`Scan complete, ${m.new_dead} new dead games`);loadStats();loadGames()}
-    if(m.type==='scan_error')toast('Scan failed: '+m.error);if(m.type==='game_updated'){loadStats();loadGames()}};ws.onclose=()=>setTimeout(connect,2000)}
+    if(m.type==='scan_error'){setScan({is_running:false});toast('Scan failed: '+m.error,14000)}if(m.type==='game_updated'){loadStats();loadGames()}};ws.onclose=()=>setTimeout(connect,2000)}
 // criteria drawer
 const drawer=on=>{$('#dr').classList.toggle('on',on);$('#ov').classList.toggle('on',on)};
 const FD={total_reviews:'Reviews',current_players:'Players now',price:'Price ($)',inactive_days:'Days inactive',zero_streak:'Scans at 0 players',release_year:'Release year',is_free:'Free (1 or 0)',early_access:'Early Access (1 or 0)'};
